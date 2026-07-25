@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 
 from . import __version__
@@ -25,8 +26,25 @@ def color_level(level: str) -> str:
     return f"{GREEN}AMAN{RESET}"
 
 
-def print_check(result: dict, verbose: bool = False):
+def print_check(result: dict, verbose: bool = False, json_output: bool = False, quiet: bool = False):
     h = result["heuristics"]
+
+    if json_output:
+        output = {
+            "url": result["original"],
+            "domain": result["domain"],
+            "expanded": result.get("expanded"),
+            "hops": result.get("hops", []),
+            "score": h["score"],
+            "level": h["level"],
+            "findings": h["findings"]
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        return
+
+    if quiet:
+        print(h["score"])
+        return
 
     print(f"\n{BOLD}Pantau — Hasil Inspeksi{RESET}")
     print(f"{DIM}{'='*40}{RESET}")
@@ -77,6 +95,8 @@ def main():
     check_p = sub.add_parser("check", help="Periksa URL/domain")
     check_p.add_argument("url", help="URL atau domain yang akan diperiksa")
     check_p.add_argument("-v", "--verbose", action="store_true", help="Tampilkan detail lengkap")
+    check_p.add_argument("--json", action="store_true", help="Output dalam format JSON")
+    check_p.add_argument("-q", "--quiet", action="store_true", help="Hanya tampilkan skor risiko")
 
     sub.add_parser("patterns", help="Daftar pola penipuan yang dikenali")
 
@@ -84,7 +104,7 @@ def main():
 
     if args.command == "check":
         result = check(args.url)
-        print_check(result, verbose=args.verbose)
+        print_check(result, verbose=args.verbose, json_output=args.json, quiet=args.quiet)
     elif args.command == "patterns":
         print_patterns()
     else:
