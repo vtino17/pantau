@@ -3,6 +3,48 @@ from urllib.parse import urlparse
 
 from .patterns import INDO_SCAM_KEYWORDS, SUSPICIOUS_TLDS, SUSPICIOUS_KEYWORDS_DOMAIN
 
+# Below this length a keyword collides with ordinary words too often to be
+# matched as a prefix or suffix ("bri" inside "cambridge", "tri" inside
+# "district", "pos" inside "repository"), so short keywords must line up with a
+# whole label.
+_MIN_AFFIX_LEN = 4
+
+_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _tokens(*parts: str) -> list:
+    """Split URL components into comparable labels.
+
+    Domains and paths are delimited by dots, slashes and hyphens, and scam
+    domains lean on exactly those separators ('bri-mobile', 'cek-bansos'), so
+    splitting on non-alphanumerics keeps detection while giving each keyword a
+    boundary to match against.
+    """
+    out = []
+    for part in parts:
+        out.extend(t for t in _TOKEN_SPLIT.split(part or "") if t)
+    return out
+
+
+def _is_official_domain(word: str, domain: str) -> bool:
+    """True when the domain *is* the brand rather than imitating it.
+
+    Without this the keyword lists flag their own subjects: tokopedia.com was
+    reported as "E-commerce palsu" for containing 'tokopedia'.
+    """
+    return domain in (f"{word}.com", f"{word}.co.id", f"{word}.id")
+
+
+def _keyword_hit(word: str, tokens: list) -> bool:
+    """True when `word` lines up with a token boundary rather than landing
+    anywhere inside one."""
+    for token in tokens:
+        if token == word:
+            return True
+        if len(word) >= _MIN_AFFIX_LEN and (token.startswith(word) or token.endswith(word)):
+            return True
+    return False
+
 
 def score_url(url: str) -> dict:
     parsed = urlparse(url)
@@ -12,6 +54,9 @@ def score_url(url: str) -> dict:
 
     # Strip www.
     domain = re.sub(r"^www\d*\.", "", domain)
+
+    domain_tokens = _tokens(domain)
+    all_tokens = _tokens(domain, path)
 
     findings = []
     score = 0
@@ -28,7 +73,7 @@ def score_url(url: str) -> dict:
     # 2. Check for typo-squatting (popular domains with extra chars)
     popular = ["tokopedia", "shopee", "lazada", "bukalapak", "google", "facebook", "instagram", "gojek", "grab", "bri", "bca", "mandiri"]
     for brand in popular:
-        if brand in domain:
+        if _keyword_hit(brand, domain_tokens):
             exact = domain == f"{brand}.com" or domain == f"{brand}.co.id"
             if not exact:
                 score += 35
@@ -37,7 +82,7 @@ def score_url(url: str) -> dict:
 
     # 3. Suspicious keywords in domain
     for kw in SUSPICIOUS_KEYWORDS_DOMAIN:
-        if kw in domain:
+        if _keyword_hit(kw, domain_tokens):
             score += 20
             findings.append(f"Keyword mencurigakan di domain: '{kw}'")
             break
@@ -45,7 +90,9 @@ def score_url(url: str) -> dict:
     # 4. Scam category keywords in path/domain
     for category, info in INDO_SCAM_KEYWORDS.items():
         for word in info["words"]:
-            if word in domain or word in path or word in full:
+            if _is_official_domain(word, domain):
+                continue
+            if _keyword_hit(word, all_tokens):
                 risk_score = 30 if info["risk"] == "high" else 15
                 score += risk_score
                 findings.append(f"{info['label']}: mengandung '{word}'")
