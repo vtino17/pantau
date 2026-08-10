@@ -1,5 +1,6 @@
 import urllib.request
 import urllib.error
+from urllib.parse import urlsplit
 
 SHORTENER_DOMAINS = {
     "s.id", "bit.ly", "bitly.com", "tinyurl.com", "shorturl.at", "t.ly",
@@ -9,11 +10,15 @@ SHORTENER_DOMAINS = {
 }
 
 def is_shortener(domain: str) -> bool:
-    domain = domain.lower().strip()
-    for s in SHORTENER_DOMAINS:
-        if s in domain or domain.endswith("." + s):
-            return True
-    return False
+    value = domain.strip()
+    if "://" not in value:
+        value = "//" + value
+    try:
+        hostname = (urlsplit(value).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return False
+    return any(hostname == shortener or hostname.endswith("." + shortener)
+               for shortener in SHORTENER_DOMAINS)
 
 def expand_url(url: str, timeout: int = 10) -> tuple[str, list[str]]:
     hops = [url]
